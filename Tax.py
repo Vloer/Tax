@@ -2,16 +2,16 @@
 import urllib.request
 import re
 import time
-import sys
 import string
+from inspect import signature
 
 
-class Persoonlijk:
+class Persoon:
 
-    def __init__(self, leeftijd, postcode, bruto_loon_mnd, vakantiegeld, bonus, uitgaven_laag, uitgaven_hoog, spaargeld,
+    def __init__(self, postcode, leeftijd, bruto_loon_mnd, vakantiegeld, bonus, uitgaven_laag, uitgaven_hoog, spaargeld,
                  verbruik_gas, verbruik_stroom, verbruik_water):
-        self.leeftijd = leeftijd
         self.postcode = postcode
+        self.leeftijd = leeftijd
         self.bruto_loon_mnd = bruto_loon_mnd
         self.vakantiegeld = vakantiegeld
         self.bonus = bonus
@@ -22,7 +22,6 @@ class Persoonlijk:
         self.verbruik_stroom = verbruik_stroom
         self.verbruik_water = verbruik_water
 
-    def get_woongegevens(self):
         print('Getting location data ...')
         start = time.perf_counter()
         url = 'https://www.postcodezoekmachine.nl/' + self.postcode.upper()
@@ -44,14 +43,13 @@ class Persoonlijk:
     def drinken(self, alcohol_per_week):
         self.alcohol = alcohol_per_week
 
+    def check_input(
 
 class Voertuig:
 
     def __init__(self, kenteken, prijs, km_jaar):
         self.prijs = prijs
         self.km_jaar = km_jaar
-        self.CO2 = False
-        self.kenteken = kenteken
 
         if len(kenteken) != 8:
             if len(kenteken) != 6:
@@ -74,12 +72,10 @@ class Voertuig:
         start = time.perf_counter()
 
         # Get html data
-        ini_response = urllib.request.urlopen('https://www.kentekencheck.nl/kenteken?i=' + self.kenteken)
-        ini_html = ini_response.read().decode(ini_response.headers.get_content_charset())
-        link_to_rapport = re.compile(r"<iframe src=\"(.*?)\"").search(ini_html).group(1)
-
-        response = urllib.request.urlopen('https://www.kentekencheck.nl' + link_to_rapport)
-        html = response.read().decode(response.headers.get_content_charset())
+        ini_url = 'https://www.kentekencheck.nl/kenteken?i=' + self.kenteken
+        ini_html = read_html(ini_url)
+        link_to_rapport = regex_lookup("<iframe src=\"(.*?)\"", ini_html)
+        html = read_html(link_to_rapport)
 
         # Read stuff
         self.merk_nummer = regex_lookup("Merk<\/td>\s*<td style=\"width:60%;\">(.*?)<\/td>", html) + ' ' + regex_lookup(
@@ -92,15 +88,21 @@ class Voertuig:
             1 / float(regex_lookup("<td>Verbruik gecombineerd<\/td>\s*<td>.*\(1:(.*?)km\)<\/td>", html)), 4)
         self.wegenbelasting = int(
             regex_lookup("<td>" + persoon.provincie + "<\/td>\s*.*\s*<td>&euro;(\d*)<\/td>", html))
+        self.CO2 = int(regex_lookup("<td>CO2 uitstoot<\/td>\s*<td>(\d*?) g\/km<\/td>", html))
 
         print('Success! Data found in {} seconds'.format(round(time.perf_counter() - start, 2)))
-        print(
-            '{}, {}, {}, {}, {}, {}, {}'.format(self.merk_nummer, self.bouwjaar, self.brandstof, self.nieuwprijs,
-                                                self.gewicht,
-                                                self.wegenbelasting, str(self.verbruik)))
+        print('{}, {}, {}, {}, {}, {}, {}m {}'.format(self.merk_nummer, self.bouwjaar, self.brandstof, self.nieuwprijs,
+                                                      self.gewicht, self.wegenbelasting, str(self.verbruik),
+                                                      str(self.CO2)))
 
 
 def regex_lookup(regex_string, data_to_search):
     reg = re.compile(r"" + regex_string + "")
     data = reg.search(data_to_search)
     return data.group(1)
+
+
+def read_html(url):
+    response = urllib.request.urlopen(url)
+    html = response.read().decode(response.headers.get_content_charset())
+    return html
