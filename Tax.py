@@ -130,11 +130,15 @@ class Belasting:
         # Gemeente
         print('Getting gemeente...')
         url = "https://www.coelo.nl/images/Gemeentelijke_belastingen_{}.xlsx".format(current_year)
+        url_name = url.split('/')[-1]
         url_opcenten = "https://www.coelo.nl/images/Provinciale_opcenten_{}.xlsx".format(current_year)
-        urllib.request.urlretrieve(url, url.split('/')[-1])
-        urllib.request.urlretrieve(url_opcenten, url_opcenten.split('/')[-1])
+        url_opcenten_name = url_opcenten.split('/')[-1]
+        if not os.path.abspath(url_name):
+            urllib.request.urlretrieve(url, url.split('/')[-1])
+        if not os.path.abspath(url_opcenten_name):
+            urllib.request.urlretrieve(url_opcenten, url_opcenten.split('/')[-1])
 
-        wb = openpyxl.load_workbook(os.path.abspath(url.split('/')[-1]))['Gegevens per gemeente']
+        wb = openpyxl.load_workbook(os.path.abspath(url_name))['Gegevens per gemeente']
         if self.huishouden_personen > 1:
             col = ['I', 'N', 'S']
         else:
@@ -142,16 +146,17 @@ class Belasting:
         for row in range(5, wb.max_row + 1):
             if wb['B' + str(row)].value == self.persoon.gemeente:
                 self.OZB = round(wb[col[0] + str(row)].value, 2)
-                self.afvalheffing = round(wb[col[1] + str(row)].value,2)
+                self.afvalheffing = round(wb[col[1] + str(row)].value, 2)
                 self.rioolheffing = wb[col[2] + str(row)].value
                 break
 
         # Opcenten
-        wb = openpyxl.load_workbook(os.path.abspath(url_opcenten.split('/')[-1]))['Gegevens per provincie']
+        wb = openpyxl.load_workbook(os.path.abspath(url_opcenten_name))['Gegevens per provincie']
         for row in range(6, 18):
             if wb['B' + str(row)].value == self.persoon.provincie:
                 self.opcenten = round(wb['C' + str(row)].value / 100, 4)
                 break
+
 
 class Calculation:
 
@@ -159,6 +164,29 @@ class Calculation:
         self.persoon = persoon
         self.auto = auto
         self.belasting = belasting
+
+        url = "https://www.belastingdienst.nl/bibliotheek/handboeken/html/boeken/HL/handboek_loonheffingen_2019-tarieven_bedragen_en_percentages.html"
+        html = read_html(url)
+
+        # Loonschaal
+        self.loonschaal = [
+            float(0),
+            float(regex_lookup("rmkrnpakgd.*?t\/m € (.*?)<\/p>", html)),
+            float(regex_lookup("bdoeboonge.*?t\/m € (.*?)<\/p>", html)),
+            float(regex_lookup("eablhjemgh.*?t\/m € (.*?)<\/p>", html))
+        ]
+        self.loonbelasting_jong = [
+            float(regex_lookup("obcfqdbaga\">(.*?)%", html).replace(',', '.'))/100,
+            float(regex_lookup("ehdmneflgk\">(.*?)%", html).replace(',', '.'))/100,
+            float(regex_lookup("eqqaokdfgo\">(.*?)%", html).replace(',', '.'))/100,
+            float(regex_lookup("eoadoaopgf\">(.*?)%", html).replace(',', '.'))/100,
+        ]
+        self.loonbelasting_aow = [
+            float(regex_lookup("pdncrhorgl\">(.*?)%", html).replace(',', '.'))/100,
+            float(regex_lookup("bkmcoadagj\">(.*?)%", html).replace(',', '.'))/100,
+            float(regex_lookup("ldfkdkfqge\">(.*?)%", html).replace(',', '.'))/100,
+            float(regex_lookup("khpffjqjgj\">(.*?)%", html).replace(',', '.'))/100
+        ]
 
 
 def regex_lookup(regex_string, data_to_search):
@@ -203,4 +231,3 @@ def check_input(arguments, str_idx, int_idx):
                     continue
     print('Checked all ints\n')
     return arguments
-
