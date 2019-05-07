@@ -135,7 +135,6 @@ class Belasting:
         urllib.request.urlretrieve(url_opcenten, url_opcenten.split('/')[-1])
 
         wb = openpyxl.load_workbook(os.path.abspath(url.split('/')[-1]))['Gegevens per gemeente']
-
         if self.huishouden_personen > 1:
             col = ['I', 'N', 'S']
         else:
@@ -143,8 +142,9 @@ class Belasting:
         for row in range(5, wb.max_row + 1):
             if wb['B' + str(row)].value == self.persoon.gemeente:
                 self.OZB = round(wb[col[0] + str(row)].value, 2)
-                self.afvalheffing = wb[col[1] + str(row)].value
+                self.afvalheffing = round(wb[col[1] + str(row)].value,2)
                 self.rioolheffing = wb[col[2] + str(row)].value
+                break
 
         # Opcenten
         wb = openpyxl.load_workbook(os.path.abspath(url_opcenten.split('/')[-1]))['Gegevens per provincie']
@@ -152,6 +152,13 @@ class Belasting:
             if wb['B' + str(row)].value == self.persoon.provincie:
                 self.opcenten = round(wb['C' + str(row)].value / 100, 4)
                 break
+
+class Calculation:
+
+    def __init__(self, persoon, auto, belasting):
+        self.persoon = persoon
+        self.auto = auto
+        self.belasting = belasting
 
 
 def regex_lookup(regex_string, data_to_search):
@@ -196,3 +203,4 @@ def check_input(arguments, str_idx, int_idx):
                     continue
     print('Checked all ints\n')
     return arguments
+
