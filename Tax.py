@@ -7,6 +7,10 @@ import datetime
 import openpyxl
 import os
 
+'''
+TODO kentekencheck voor aa-123-a ipv aa-12-34 oid
+'''
+
 
 class Persoon:
 
@@ -72,7 +76,17 @@ class Voertuig:
         if len(self.kenteken) == 8:
             self.kenteken = self.kenteken.upper()
         else:  # is 6
-            self.kenteken = (self.kenteken[:2] + '-' + self.kenteken[2:4] + '-' + self.kenteken[4:6]).upper()
+            int_count = 0
+            for letter in self.kenteken:
+                try:
+                    int(letter)
+                    int_count += 1
+                except ValueError:
+                    pass
+            if int_count > 2:
+                self.kenteken = (self.kenteken[:2] + '-' + self.kenteken[2:5] + '-' + self.kenteken[5]).upper()
+            else:
+                self.kenteken = (self.kenteken[:2] + '-' + self.kenteken[2:4] + '-' + self.kenteken[4:6]).upper()
 
         print('Getting vehicle data ...')
         start = time.perf_counter()
@@ -87,20 +101,26 @@ class Voertuig:
         # Read stuff
         self.merk_nummer = regex_lookup("Merk<\/td>\s*<td style=\"width:60%;\">(.*?)<\/td>", html) + ' ' + regex_lookup(
             "<td>Type<\/td>\s*<td>(.*?)<\/td>", html)
-        self.bouwjaar = regex_lookup("<td>Bouwjaar<\/td>\s*<td>.*(\d{4})<\/td>", html)
+        self.bouwjaar = regex_lookup("<td>Bouwjaar<\/td>\s*<td>.*?(\d{4})<\/td>", html)
         self.brandstof = regex_lookup("<td>Brandstof<\/td>\s*<td>(.*?)<\/td>", html)
         self.nieuwprijs = regex_lookup("<td>Nieuwprijs<\/td>\s*<td>&euro; (.*?)<\/td>", html).replace('.', '')
         self.gewicht = regex_lookup("<td>Massa ledig voertuig<\/td>\s*<td>(\d*) KG<\/td>", html)
-        self.verbruik = round(
-            1 / float(regex_lookup("<td>Verbruik gecombineerd<\/td>\s*<td>.*\(1:(.*?)km\)<\/td>", html)), 4)
         self.wegenbelasting = int(
-            regex_lookup("<td>" + self.persoon.provincie + "<\/td>\s*.*\s*<td>&euro;(\d*)<\/td>", html))
-        self.CO2 = int(regex_lookup("<td>CO2 uitstoot<\/td>\s*<td>(\d*?) g\/km<\/td>", html))
+            regex_lookup("<td>" + self.persoon.provincie + "<\/td>\s*.*?<\/td>\s*<td>&euro;(\d*)<\/td>", html))
+        try:
+            self.verbruik = round(
+                1 / float(regex_lookup("<td>Verbruik gecombineerd<\/td>\s*<td>.*\(1:(.*?)km\)<\/td>", html)), 4)
+        except AttributeError:
+            print('Verbruik niet gevonden')
+        try:
+            self.CO2_uitstoot = int(regex_lookup("<td>CO2 uitstoot<\/td>\s*<td>(\d*?) g\/km<\/td>", html))
+        except AttributeError:
+            print('CO2 uitstoot niet gevonden')
 
         print('Success! Data found in {} seconds'.format(round(time.perf_counter() - start, 2)))
         print('{}, {}, {}, {}, {}, {}, {}, {}'.format(self.merk_nummer, self.bouwjaar, self.brandstof, self.nieuwprijs,
                                                       self.gewicht, self.wegenbelasting, str(self.verbruik),
-                                                      str(self.CO2)))
+                                                      str(self.CO2_uitstoot)))
 
 
 class Belasting:
@@ -134,9 +154,9 @@ class Belasting:
         url_opcenten = "https://www.coelo.nl/images/Provinciale_opcenten_{}.xlsx".format(current_year)
         url_opcenten_name = url_opcenten.split('/')[-1]
         if not os.path.abspath(url_name):
-            urllib.request.urlretrieve(url, url.split('/')[-1])
+            urllib.request.urlretrieve(url, url_name)
         if not os.path.abspath(url_opcenten_name):
-            urllib.request.urlretrieve(url_opcenten, url_opcenten.split('/')[-1])
+            urllib.request.urlretrieve(url_opcenten, url_opcenten_name)
 
         wb = openpyxl.load_workbook(os.path.abspath(url_name))['Gegevens per gemeente']
         if self.huishouden_personen > 1:
@@ -157,42 +177,121 @@ class Belasting:
                 self.opcenten = round(wb['C' + str(row)].value / 100, 4)
                 break
 
+        # Loonschaal
+        url = "https://www.belastingdienst.nl/bibliotheek/handboeken/html/boeken/HL/handboek_loonheffingen_2019-tarieven_bedragen_en_percentages.html"
+        html = read_html(url)
+
+        self.loonbelasting_schaal = [
+            float(0),
+            float(regex_lookup("rmkrnpakgd.*?t\/m € (.*?)<\/p>", html)),
+            float(regex_lookup("bdoeboonge.*?t\/m € (.*?)<\/p>", html)),
+            float(regex_lookup("eablhjemgh.*?t\/m € (.*?)<\/p>", html))
+        ]
+        self.loonbelasting = [
+            float(regex_lookup("obcfqdbaga\">(.*?)%", html).replace(',', '.')) / 100,
+            float(regex_lookup("ehdmneflgk\">(.*?)%", html).replace(',', '.')) / 100,
+            float(regex_lookup("eqqaokdfgo\">(.*?)%", html).replace(',', '.')) / 100,
+            float(regex_lookup("eoadoaopgf\">(.*?)%", html).replace(',', '.')) / 100,
+        ]
+        self.loonbelasting_aow = [
+            float(regex_lookup("pdncrhorgl\">(.*?)%", html).replace(',', '.')) / 100,
+            float(regex_lookup("bkmcoadagj\">(.*?)%", html).replace(',', '.')) / 100,
+            float(regex_lookup("ldfkdkfqge\">(.*?)%", html).replace(',', '.')) / 100,
+            float(regex_lookup("khpffjqjgj\">(.*?)%", html).replace(',', '.')) / 100
+        ]
+
+        # Vermogensbelasting
+        url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/vermogen_en_aanmerkelijk_belang/vermogen/belasting_betalen_over_uw_vermogen/grondslag_sparen_en_beleggen/berekening-2019/berekening-belasting-over-inkomen-uit-vermogen-over-2019"
+        html = read_html(url)
+
+        self.vermogensbelasting_schaal = [
+            int(regex_lookup("Tot en met €&nbsp;(.*?)<\/p>", html)),
+            int(regex_lookup("Vanaf €&nbsp;.*?tot en met €&nbsp;(.*?)<\/p>", html)),
+            int(regex_lookup("Vanaf €&nbsp;<span>(.*?)<\/span><\/p", html))
+        ]
+
+        self.vermogensbelasting_percentage = [
+            int(regex_lookup(str(self.vermogensbelasting_schaal[0]) + ".*?<p>(.*?)%<\/p>", html)) / 100,
+            int(regex_lookup(str(self.vermogensbelasting_schaal[1]) + ".*?<p>(.*?)%<\/p>", html)) / 100,
+            int(0),
+        ]
+
+        self.vermogensbelasting_rendement = [
+            float(regex_lookup("<p>Percentage<br \/> (.*?)%\s*<\/p>", html).replace(',', '.')),
+            float(regex_lookup("<th>Percentage<br \/> (.*?)%\s*<\/th>", html).replace(',', '.'))
+        ]
+
+        # CO2
+        url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/auto_en_vervoer/belastingen_op_auto_en_motor/bpm/bpm_berekenen_en_betalen/bpm_tarief/bpm-tarief-personenauto"
+        html = read_html(url)
+
+        uitstoot_min = regex_lookup_nogroup("row\">\s*<p>(\d*)\s", html)
+        uitstoot_bedragen = regex_lookup_nogroup(">€&nbsp;(.*?)<\/p>", html)
+        self.CO2_BPM = [
+            [uitstoot_min[0], uitstoot_bedragen[0], uitstoot_bedragen[1]],
+            [uitstoot_min[1], uitstoot_bedragen[2], uitstoot_bedragen[3]],
+            [uitstoot_min[2], uitstoot_bedragen[4], uitstoot_bedragen[5]],
+            [uitstoot_min[3], uitstoot_bedragen[6], uitstoot_bedragen[7]],
+            [uitstoot_min[4], uitstoot_bedragen[8], uitstoot_bedragen[9]]
+        ]
+        self.CO2_BPM = [[val.replace('.', '') for val in row] for row in self.CO2_BPM]  # replace dots
+        self.CO2_BPM = [[int(val) for val in row] for row in self.CO2_BPM]  # convert to int
+        self.CO2_diesel_grens = regex_lookup("(\d*)&nbsp;gram\/km\.<\/p>", html)
+        self.CO2_diesel_toeslag = regex_lookup("van €&nbsp;(.*?)per gram", html)
+
+        # Algemene heffingskorting
+        url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/inkomstenbelasting/heffingskortingen_boxen_tarieven/heffingskortingen/algemene_heffingskorting/tabel-algemene-heffingskorting-2019"
+        html = read_html(url)
+
+        alg_korting_values = regex_lookup_nogroup("€&nbsp;(.*?)<\/p>", html)
+        alg_korting_values = [alg_korting_values[val].replace('.','') for val in range(len(alg_korting_values))]
+        self.alg_korting = [
+            [alg_korting_values[0], alg_korting_values[2]],
+            [alg_korting_values[1], float(regex_lookup_nogroup("<\/span>-(.*?)% x", html)[0].replace(',', '.')) / 100],
+            [alg_korting_values[6], alg_korting_values[7]]
+        ]
+        self.alg_korting_aow = [
+            [alg_korting_values[8], alg_korting_values[10]],
+            [alg_korting_values[1], float(regex_lookup_nogroup("<\/span>-(.*?)% x", html)[1].replace(',', '.')) / 100],
+            [alg_korting_values[14], alg_korting_values[15]]
+        ]
+        for row in range(len(self.alg_korting)): # Convert all compatible numbers (not floats) to int
+            for val in range(len(self.alg_korting[row])):
+                if type(self.alg_korting[row][val]) == str:
+                    self.alg_korting[row][val] = int(self.alg_korting[row][val])
+                if type(self.alg_korting_aow[row][val]) == str:
+                    self.alg_korting_aow[row][val] = int(self.alg_korting_aow[row][val])
+
+
+        # Arbeidskorting
+        url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/inkomstenbelasting/heffingskortingen_boxen_tarieven/heffingskortingen/arbeidskorting/tabel-arbeidskorting-2019"
+        html = read_html(url)
+
+        
+
 
 class Calculation:
+    '''
+    CO2 berekenen:
+    ( CO2_uitstoot - CO2_BPM[rij][0] ) * CO2_BPM[rij][2] + CO2_BPM[rij][1]
+    '''
 
     def __init__(self, persoon, auto, belasting):
         self.persoon = persoon
         self.auto = auto
         self.belasting = belasting
 
-        url = "https://www.belastingdienst.nl/bibliotheek/handboeken/html/boeken/HL/handboek_loonheffingen_2019-tarieven_bedragen_en_percentages.html"
-        html = read_html(url)
-
-        # Loonschaal
-        self.loonschaal = [
-            float(0),
-            float(regex_lookup("rmkrnpakgd.*?t\/m € (.*?)<\/p>", html)),
-            float(regex_lookup("bdoeboonge.*?t\/m € (.*?)<\/p>", html)),
-            float(regex_lookup("eablhjemgh.*?t\/m € (.*?)<\/p>", html))
-        ]
-        self.loonbelasting_jong = [
-            float(regex_lookup("obcfqdbaga\">(.*?)%", html).replace(',', '.'))/100,
-            float(regex_lookup("ehdmneflgk\">(.*?)%", html).replace(',', '.'))/100,
-            float(regex_lookup("eqqaokdfgo\">(.*?)%", html).replace(',', '.'))/100,
-            float(regex_lookup("eoadoaopgf\">(.*?)%", html).replace(',', '.'))/100,
-        ]
-        self.loonbelasting_aow = [
-            float(regex_lookup("pdncrhorgl\">(.*?)%", html).replace(',', '.'))/100,
-            float(regex_lookup("bkmcoadagj\">(.*?)%", html).replace(',', '.'))/100,
-            float(regex_lookup("ldfkdkfqge\">(.*?)%", html).replace(',', '.'))/100,
-            float(regex_lookup("khpffjqjgj\">(.*?)%", html).replace(',', '.'))/100
-        ]
-
 
 def regex_lookup(regex_string, data_to_search):
     reg = re.compile(r"" + regex_string + "", re.DOTALL)
     data = reg.search(data_to_search)
     return data.group(1)
+
+
+def regex_lookup_nogroup(regex_string, data_to_search):
+    reg = re.compile(r"" + regex_string + "", re.DOTALL)
+    data = reg.findall(data_to_search)
+    return data
 
 
 def read_html(url):
