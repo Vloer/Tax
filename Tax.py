@@ -8,16 +8,19 @@ import openpyxl
 import os
 
 '''
-TODO kentekencheck voor aa-123-a ipv aa-12-34 oid
+TODO arbeidsinkomen berekening niet hardcoden
+TODO heffinsvrijvermogen https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/vermogen_en_aanmerkelijk_belang/vermogen/belasting_betalen_over_uw_vermogen/heffingsvrij_vermogen/
+TODO premievolk
+TODO roken/alcohol accijns
 '''
 
 
 class Persoon:
 
-    def __init__(self, postcode, leeftijd, bruto_loon_mnd, bonus, uitgaven_laag, uitgaven_hoog, spaargeld,
+    def __init__(self, postcode, leeftijd, bruto_loon_mnd, bonus, uitgaven_laag, uitgaven_hoog, spaargeld, schulden,
                  verbruik_gas, verbruik_stroom, verbruik_water):
         params_init = locals()
-        params = check_input(params_init, [0], range(1, 10))
+        params = check_input(params_init, [0], range(1, 11))
 
         self.postcode = params['postcode']
         self.leeftijd = params['leeftijd']
@@ -26,6 +29,7 @@ class Persoon:
         self.uitgaven_laag = params['uitgaven_laag'] * 12
         self.uitgaven_hoog = params['uitgaven_hoog'] * 12
         self.spaargeld = params['spaargeld']
+        self.schulden = params['schulden']
         self.verbruik_gas = params['verbruik_gas']
         self.verbruik_stroom = params['verbruik_stroom']
         self.verbruik_water = params['verbruik_water']
@@ -33,7 +37,8 @@ class Persoon:
         self.vakantiegeld = self.bruto_loon_jr * 0.08
         self.roken = 0
         self.alcohol = 0
-        self.loon_totaal = self.bruto_loon_jr + self.bonus + self.vakantiegeld
+        self.loon_speciaal = self.vakantiegeld + self.bonus
+        self.loon_totaal = self.bruto_loon_jr + self.loon_speciaal
 
         print('Getting location data ...')
         start = time.perf_counter()
@@ -125,9 +130,10 @@ class Voertuig:
 
 class Belasting:
 
-    def __init__(self, persoon, auto, huishouden_personen):
+    def __init__(self, persoon, auto, huishouden_personen, fiscale_partner):
         self.persoon = persoon
         self.auto = auto
+        self.fiscale_partner = fiscale_partner
         try:
             self.huishouden_personen = int(huishouden_personen)
         except ValueError:
@@ -140,11 +146,11 @@ class Belasting:
         url = "https://www.unitedconsumers.com/tanken/informatie/opbouw-brandstofprijzen.asp"
         html = read_html(url)
         self.benzine_prijs = float(regex_lookup("Opbouw Benzine .*?<strong>(.*?)<\/strong>", html).replace(',', '.'))
-        self.benzine_btw = regex_lookup("Opbouw Benzine .*?BTW.*?(\d*)%", html)
-        self.benzine_accijns = regex_lookup("Opbouw Benzine .*?Accijns.*?(\d*)%", html)
+        self.benzine_btw = int(regex_lookup("Opbouw Benzine .*?BTW.*?(\d*)%", html)) / 100
+        self.benzine_accijns = int(regex_lookup("Opbouw Benzine .*?Accijns.*?(\d*)%", html)) / 100
         self.diesel_prijs = float(regex_lookup("Opbouw Diesel .*?<strong>(.*?)<\/strong>", html).replace(',', '.'))
-        self.diesel_btw = regex_lookup("Opbouw Diesel .*?BTW.*?(\d*)%", html)
-        self.diesel_accijns = regex_lookup("Opbouw Diesel .*?Accijns.*?(\d*)%", html)
+        self.diesel_btw = int(regex_lookup("Opbouw Diesel .*?BTW.*?(\d*)%", html)) / 100
+        self.diesel_accijns = int(regex_lookup("Opbouw Diesel .*?Accijns.*?(\d*)%", html)) / 100
         self.MRB = self.auto.wegenbelasting
 
         # Gemeente
@@ -182,10 +188,10 @@ class Belasting:
         html = read_html(url)
 
         self.loonbelasting_schaal = [
-            float(0),
-            float(regex_lookup("rmkrnpakgd.*?t\/m € (.*?)<\/p>", html)),
-            float(regex_lookup("bdoeboonge.*?t\/m € (.*?)<\/p>", html)),
-            float(regex_lookup("eablhjemgh.*?t\/m € (.*?)<\/p>", html))
+            0,
+            int(regex_lookup("rmkrnpakgd.*?t\/m € (.*?)<\/p>", html).replace('.', '')),
+            int(regex_lookup("bdoeboonge.*?t\/m € (.*?)<\/p>", html).replace('.', '')),
+            int(regex_lookup("eablhjemgh.*?t\/m € (.*?)<\/p>", html).replace('.', ''))
         ]
         self.loonbelasting = [
             float(regex_lookup("obcfqdbaga\">(.*?)%", html).replace(',', '.')) / 100,
@@ -205,21 +211,27 @@ class Belasting:
         html = read_html(url)
 
         self.vermogensbelasting_schaal = [
-            int(regex_lookup("Tot en met €&nbsp;(.*?)<\/p>", html)),
-            int(regex_lookup("Vanaf €&nbsp;.*?tot en met €&nbsp;(.*?)<\/p>", html)),
-            int(regex_lookup("Vanaf €&nbsp;<span>(.*?)<\/span><\/p", html))
+            0,
+            int(regex_lookup("Tot en met €&nbsp;(.*?)<\/p>", html).replace('.', '')),
+            int(regex_lookup("Vanaf €&nbsp;.*?tot en met €&nbsp;(.*?)<\/p>", html).replace('.', ''))
         ]
-
-        self.vermogensbelasting_percentage = [
-            int(regex_lookup(str(self.vermogensbelasting_schaal[0]) + ".*?<p>(.*?)%<\/p>", html)) / 100,
-            int(regex_lookup(str(self.vermogensbelasting_schaal[1]) + ".*?<p>(.*?)%<\/p>", html)) / 100,
-            int(0),
-        ]
-
+        # self.vermogensbelasting_percentage = [
+        #     int(regex_lookup_nogroup("<p>(\d*?)%<\/p>", html)[0]) / 100,
+        #     int(regex_lookup_nogroup("<p>(\d*?)%<\/p>", html)[2]) / 100,
+        #     0
+        # ]
         self.vermogensbelasting_rendement = [
-            float(regex_lookup("<p>Percentage<br \/> (.*?)%\s*<\/p>", html).replace(',', '.')),
-            float(regex_lookup("<th>Percentage<br \/> (.*?)%\s*<\/th>", html).replace(',', '.'))
+            round(float(regex_lookup_nogroup("<p>(\d*,\d*)%<\/p>", html)[0].replace(',', '.')) / 100, 5),
+            round(float(regex_lookup_nogroup("<p>(\d*,\d*)%<\/p>", html)[1].replace(',', '.')) / 100, 5),
+            round(float(regex_lookup_nogroup("<p>(\d*,\d*)%<\/p>", html)[2].replace(',', '.')) / 100, 5)
         ]
+
+        # Heffingsvrij vermogen
+        url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/vermogen_en_aanmerkelijk_belang/vermogen/belasting_betalen_over_uw_vermogen/heffingsvrij_vermogen/heffingsvrij_vermogen"
+        html = read_html(url)
+
+        self.heffingsvrijvermogen = regex_lookup_nogroup("<span>€ (.*?)<\/span>", html)[0]
+        self.heffingsvrijvermogen = self.heffingsvrijvermogen * (self.belasting.fiscale_partner + 1)
 
         # CO2
         url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/auto_en_vervoer/belastingen_op_auto_en_motor/bpm/bpm_berekenen_en_betalen/bpm_tarief/bpm-tarief-personenauto"
@@ -236,15 +248,15 @@ class Belasting:
         ]
         self.CO2_BPM = [[val.replace('.', '') for val in row] for row in self.CO2_BPM]  # replace dots
         self.CO2_BPM = [[int(val) for val in row] for row in self.CO2_BPM]  # convert to int
-        self.CO2_diesel_grens = regex_lookup("(\d*)&nbsp;gram\/km\.<\/p>", html)
-        self.CO2_diesel_toeslag = regex_lookup("van €&nbsp;(.*?)per gram", html)
+        self.CO2_diesel_grens = int(regex_lookup("(\d*)&nbsp;gram\/km\.<\/p>", html))
+        self.CO2_diesel_toeslag = float(regex_lookup("van €&nbsp;(.*?)per gram", html).replace(',', '.'))
 
         # Algemene heffingskorting
         url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/inkomstenbelasting/heffingskortingen_boxen_tarieven/heffingskortingen/algemene_heffingskorting/tabel-algemene-heffingskorting-2019"
         html = read_html(url)
 
         alg_korting_values = regex_lookup_nogroup("€&nbsp;(.*?)<\/p>", html)
-        alg_korting_values = [alg_korting_values[val].replace('.','') for val in range(len(alg_korting_values))]
+        alg_korting_values = [alg_korting_values[val].replace('.', '') for val in range(len(alg_korting_values))]
         self.alg_korting = [
             [alg_korting_values[0], alg_korting_values[2]],
             [alg_korting_values[1], float(regex_lookup_nogroup("<\/span>-(.*?)% x", html)[0].replace(',', '.')) / 100],
@@ -255,31 +267,142 @@ class Belasting:
             [alg_korting_values[1], float(regex_lookup_nogroup("<\/span>-(.*?)% x", html)[1].replace(',', '.')) / 100],
             [alg_korting_values[14], alg_korting_values[15]]
         ]
-        for row in range(len(self.alg_korting)): # Convert all compatible numbers (not floats) to int
+        for row in range(len(self.alg_korting)):  # Convert all compatible numbers (not floats) to int
             for val in range(len(self.alg_korting[row])):
                 if type(self.alg_korting[row][val]) == str:
                     self.alg_korting[row][val] = int(self.alg_korting[row][val])
                 if type(self.alg_korting_aow[row][val]) == str:
                     self.alg_korting_aow[row][val] = int(self.alg_korting_aow[row][val])
 
+        self.alg_korting[1][1] = self.alg_korting[0][1] - self.alg_korting[1][1] * (
+                self.persoon.bruto_loon_jr - self.alg_korting[1][0])
+        self.alg_korting_aow[1][1] = self.alg_korting_aow[0][1] - self.alg_korting_aow[1][1] * (
+                self.persoon.bruto_loon_jr - self.alg_korting_aow[1][0])
 
         # Arbeidskorting
         url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/inkomstenbelasting/heffingskortingen_boxen_tarieven/heffingskortingen/arbeidskorting/tabel-arbeidskorting-2019"
         html = read_html(url)
 
-        
+        arbeidskorting_schaal_values = regex_lookup_nogroup("<p>€&nbsp;(?:<span>)?(.*?)(?:<\/span>)?<\/p>", html)
+        self.arbeidskorting_schaal = [
+            int(arbeidskorting_schaal_values[0].replace('.', '')),
+            int(arbeidskorting_schaal_values[2].replace('.', '')),
+            int(arbeidskorting_schaal_values[5].replace('.', '')),
+            int(arbeidskorting_schaal_values[9].replace('.', ''))
+        ]
+        self.arbeidskorting_korting = [
+            0.01754 * self.persoon.bruto_loon_jr,
+            170 + 0.28712 * (self.persoon.bruto_loon_jr - self.arbeidskorting_schaal[1]),
+            3399,
+            3399 - 0.06 * (self.persoon.bruto_loon_jr - self.arbeidskorting_schaal[3]),
+            0
+        ]
+        self.arbeidskorting_korting_aow = [
+            0.00898 * self.persoon.bruto_loon_jr,
+            88 + 0.14689 * (self.persoon.bruto_loon_jr - self.arbeidskorting_schaal[1]),
+            1740,
+            1740 - 0.03069 * (self.persoon.bruto_loon_jr - self.arbeidskorting_schaal[3]),
+            0
+        ]
 
 
 class Calculation:
-    '''
-    CO2 berekenen:
-    ( CO2_uitstoot - CO2_BPM[rij][0] ) * CO2_BPM[rij][2] + CO2_BPM[rij][1]
-    '''
 
     def __init__(self, persoon, auto, belasting):
         self.persoon = persoon
         self.auto = auto
         self.belasting = belasting
+
+    ''' 
+        BTW wordt als volgt berekend:
+        uitgaven met lage btw (voedsel etc) * 9%   +
+        uitgaven met hogte btw (incidenteel, wasmachine etc) * 21%    +
+        aantal gereden kilometers per jaar * verbruik (liter per km) * btw op benzine
+    '''
+    def get_BTW(self):
+        self.btw_laag = self.persoon.uitgaven_laag * 0.09
+        self.btw_hoog = self.persoon.uitgaven_hoog * 0.21 + self.auto.km_jaar * self.auto.verbruik * self.belasting.benzine_btw
+        self.btw = self.btw_hoog + self.btw_laag
+        print('Calculated BTW')
+
+    # Roken / Alcohol
+    # self.rokenalcohol = 52*(self.persoon.roken*self.belasting.roken_accijns*6.50 + self.persoon.alcohol*self.belasting.alcohol_accijns*0.3)*1.21
+    print('Calculated roken/alcohol')
+
+    ''' 
+        Brandstof accijns is verbruik * kilometers * accijns
+        BPM wordt berekend per CO2 uitstoot met verschillende schalen
+        Als je een diesel rijd die meer dan 61 g/km CO2 uitstoot betaal je extra dieseltoeslag
+    '''
+    def get_auto(self):
+        if self.auto.brandstof.lower() == 'benzine':
+            self.brandstof_accijns = self.auto.km_jaar * self.auto.verbruik * self.belasting.benzine_accijns
+        elif self.auto.brandstof.lower() == 'diesel':
+            self.brandstof_accijns = self.auto.km_jaar * self.auto.verbruik * self.belasting.diesel_accijns
+
+        if self.auto.CO2_uitstoot == 0:
+            self.BPM = 0
+        else:
+            row = find_row(self.belasting.CO2_BPM, self.auto.CO2_uitstoot)
+            self.BPM = (self.auto.CO2_uitstoot - self.belasting.CO2_BPM[row][0]) * self.belasting.CO2_BPM[row][2] + \
+                       self.belasting.CO2_BPM[row][1]
+
+        if self.auto.CO2_uitstoot > self.belasting.CO2_diesel_grens and self.auto.brandstof.lower() == 'diesel':
+            self.BPM = self.BPM + self.belasting.CO2_diesel_toeslag * (
+                    self.auto.CO2_uitstoot - self.belasting.CO2_diesel_grens)
+        print('Calculated car')
+
+    # Loon
+    def get_loon(self):
+        if self.persoon.leeftijd > 67:
+            procent = self.belasting.loonbelasting_aow
+            alg_korting = self.belasting.alg_korting_aow
+            arbeid = self.belasting.arbeidskorting_korting_aow
+        else:
+            procent = self.belasting.loonbelasting
+            alg_korting = self.belasting.alg_korting
+            arbeid = self.belasting.arbeidskorting_korting
+
+        loon_bruto = self.persoon.bruto_loon_jr
+        loon_totaal = self.persoon.loon_totaal
+        loon_speciaal = self.persoon.loon_speciaal
+        schaal_loon = self.belasting.loonbelasting_schaal
+        schaal_arbeid = self.belasting.arbeidskorting_schaal
+
+        row = find_row(schaal_loon, loon_bruto)
+        over = loon_bruto - schaal_loon[row]
+        loontaks = 0
+        if row == 0:
+            loontaks += (schaal_loon[row + 1] - schaal_loon[row]) * procent[row]
+        else:
+            for schijf in range(row):
+                loontaks += (schaal_loon[schijf + 1] - schaal_loon[schijf]) * procent(schijf)
+        loontaks += over * procent[row]
+
+        row = find_row(schaal_loon, loon_totaal)
+        loontaks_speciaal = procent[row] * loon_speciaal
+
+        row = find_row(alg_korting, loon_bruto)
+        heffingskorting = alg_korting[row][1]
+
+        row = find_row(schaal_arbeid, arbeid)
+        arbeidskorting = arbeid[row]
+
+        # Vermogensbelasting
+        vermogen = self.persoon.spaargeld - self.persoon.schulden - self.belasting.heffingsvrijvermogen
+        vermogensbelasting = 0
+        if vermogen > 0:
+            row = find_row(self.belasting.vermogensbelasting_schaal, vermogen)
+            over = vermogen - self.belasting.vermogensbelasting_schaal[row]
+            if row == 0:
+                vermogensbelasting += self.belasting.vermogensbelasting_schaal[row] * \
+                                      self.belasting.vermogensbelasting_rendement[row]
+            else:
+                for schijf in range(row):
+                    vermogensbelasting += (self.belasting.vermogensbelasting_schaal[schijf + 1] -
+                                           self.belasting.vermogensbelasting_schaal[schijf]) * \
+                                          self.belasting.vermogensbelasting_rendement[schijf]
+                vermogensbelasting += over * self.belasting.vermogensbelasting_rendement[row]
 
 
 def regex_lookup(regex_string, data_to_search):
@@ -298,6 +421,16 @@ def read_html(url):
     response = urllib.request.urlopen(url)
     html = response.read().decode(response.headers.get_content_charset())
     return html
+
+
+def find_row(table, var):
+    for row in range(len(table) - 1, -1, -1):  # count down from rows in table to 0
+        try:
+            if var > table[row][0]:
+                return row
+        except TypeError:
+            if var > table[row]:
+                return row
 
 
 def check_input(arguments, str_idx, int_idx):
