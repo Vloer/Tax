@@ -9,7 +9,6 @@ import os
 
 '''
 TODO arbeidsinkomen berekening niet hardcoden
-TODO heffinsvrijvermogen https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/vermogen_en_aanmerkelijk_belang/vermogen/belasting_betalen_over_uw_vermogen/heffingsvrij_vermogen/
 TODO premievolk
 TODO roken/alcohol accijns
 '''
@@ -30,9 +29,9 @@ class Persoon:
         self.uitgaven_hoog = params['uitgaven_hoog'] * 12
         self.spaargeld = params['spaargeld']
         self.schulden = params['schulden']
-        self.verbruik_gas = params['verbruik_gas']
-        self.verbruik_stroom = params['verbruik_stroom']
-        self.verbruik_water = params['verbruik_water']
+        self.verbruik_gas = params['verbruik_gas'] * 12
+        self.verbruik_stroom = params['verbruik_stroom'] * 12
+        self.verbruik_water = params['verbruik_water'] * 12
         self.bruto_loon_jr = self.bruto_loon_mnd * 12
         self.vakantiegeld = self.bruto_loon_jr * 0.08
         self.roken = 0
@@ -40,6 +39,10 @@ class Persoon:
         self.loon_speciaal = self.vakantiegeld + self.bonus
         self.loon_totaal = self.bruto_loon_jr + self.loon_speciaal
 
+        '''
+        Informatie over de woonplaats van de persoon (stad, gemeente, provincie) 
+        wordt automatisch opgehaald aan de hand van de postcode
+        '''
         print('Getting location data ...')
         start = time.perf_counter()
         url = 'https://www.postcodezoekmachine.nl/' + self.postcode.upper()
@@ -73,11 +76,14 @@ class Voertuig:
         self.prijs = params['prijs']
         self.km_jaar = params['km_jaar']
 
+        # Zorg ervoor dat het kenteken 6 of 8 (met streepjes ertussen) tekens lang is
         if not (len(self.kenteken) != 8 or len(self.kenteken) != 6):
             self.kenteken = input('Kenteken moet 6 (12abcd) of 8 (12-ab-cd) tekens zijn >>> ')
 
     def get_data(self):
-        # Convert kenteken, length is either 6 or 8
+        '''
+        Zet kenteken in de goede vorm (12-AB-CD of 12-ABC-3) ongeacht van inpu
+        '''
         if len(self.kenteken) == 8:
             self.kenteken = self.kenteken.upper()
         else:  # is 6
@@ -93,6 +99,9 @@ class Voertuig:
             else:
                 self.kenteken = (self.kenteken[:2] + '-' + self.kenteken[2:4] + '-' + self.kenteken[4:6]).upper()
 
+        '''
+        Haal automatisch informatie over de auto op
+        '''
         print('Getting vehicle data ...')
         start = time.perf_counter()
 
@@ -131,6 +140,14 @@ class Voertuig:
 class Belasting:
 
     def __init__(self, persoon, auto, huishouden_personen, fiscale_partner):
+        '''
+        Verschillende belastingen worden hier berekend op basis van persoons/voertuigs gegevens
+
+        :param persoon:             naam van de persoon gedefiniëerd in class Persoon
+        :param auto:                naam van het voertuig gedefiniëerd in class Voertuig
+        :param huishouden_personen: aantal personen waarmee je samenwoont
+        :param fiscale_partner:     afwezigheid (0) of aanwezigheid (1) van een fiscale partner
+        '''
         self.persoon = persoon
         self.auto = auto
         self.fiscale_partner = fiscale_partner
@@ -159,6 +176,8 @@ class Belasting:
         url_name = url.split('/')[-1]
         url_opcenten = "https://www.coelo.nl/images/Provinciale_opcenten_{}.xlsx".format(current_year)
         url_opcenten_name = url_opcenten.split('/')[-1]
+
+        # Download excel tabellen als ze nog niet bestaan
         if not os.path.abspath(url_name):
             urllib.request.urlretrieve(url, url_name)
         if not os.path.abspath(url_opcenten_name):
@@ -215,11 +234,6 @@ class Belasting:
             int(regex_lookup("Tot en met €&nbsp;(.*?)<\/p>", html).replace('.', '')),
             int(regex_lookup("Vanaf €&nbsp;.*?tot en met €&nbsp;(.*?)<\/p>", html).replace('.', ''))
         ]
-        # self.vermogensbelasting_percentage = [
-        #     int(regex_lookup_nogroup("<p>(\d*?)%<\/p>", html)[0]) / 100,
-        #     int(regex_lookup_nogroup("<p>(\d*?)%<\/p>", html)[2]) / 100,
-        #     0
-        # ]
         self.vermogensbelasting_rendement = [
             round(float(regex_lookup_nogroup("<p>(\d*,\d*)%<\/p>", html)[0].replace(',', '.')) / 100, 5),
             round(float(regex_lookup_nogroup("<p>(\d*,\d*)%<\/p>", html)[1].replace(',', '.')) / 100, 5),
@@ -313,13 +327,18 @@ class Calculation:
         self.auto = auto
         self.belasting = belasting
 
-    ''' 
+
+
+    def get_BTW(self):
+        '''
         BTW wordt als volgt berekend:
         uitgaven met lage btw (voedsel etc) * 9%   +
         uitgaven met hogte btw (incidenteel, wasmachine etc) * 21%    +
         aantal gereden kilometers per jaar * verbruik (liter per km) * btw op benzine
-    '''
-    def get_BTW(self):
+
+        Uitkomstvariabelen zijn:
+        self.BTW
+        '''
         self.btw_laag = self.persoon.uitgaven_laag * 0.09
         self.btw_hoog = self.persoon.uitgaven_hoog * 0.21 + self.auto.km_jaar * self.auto.verbruik * self.belasting.benzine_btw
         self.btw = self.btw_hoog + self.btw_laag
@@ -329,12 +348,17 @@ class Calculation:
     # self.rokenalcohol = 52*(self.persoon.roken*self.belasting.roken_accijns*6.50 + self.persoon.alcohol*self.belasting.alcohol_accijns*0.3)*1.21
     print('Calculated roken/alcohol')
 
-    ''' 
+
+
+    def get_auto(self):
+        '''
         Brandstof accijns is verbruik * kilometers * accijns
         BPM wordt berekend per CO2 uitstoot met verschillende schalen
         Als je een diesel rijd die meer dan 61 g/km CO2 uitstoot betaal je extra dieseltoeslag
-    '''
-    def get_auto(self):
+
+        Uitkomstvariabelen zijn:
+        self.BPM
+        '''
         if self.auto.brandstof.lower() == 'benzine':
             self.brandstof_accijns = self.auto.km_jaar * self.auto.verbruik * self.belasting.benzine_accijns
         elif self.auto.brandstof.lower() == 'diesel':
@@ -354,6 +378,17 @@ class Calculation:
 
     # Loon
     def get_loon(self):
+        '''
+        Verschillende aspecten van de loon worden hier berekend en aanvankelijk opgeslaan als losse variable, dus niet
+        gekoppeld aan self (om de leesbaarheid van de berekeningen te behouden)
+
+        Uitkomstvariabelen zijn:
+        self.loontaks = loontaks
+        self.loontaks_speciaal = loontaks_speciaal
+        self.heffingskorting = heffingskorting
+        self.arbeidskorting = arbeidskorting
+        self.vermogensbelasting = vermogensbelasting
+        '''
         if self.persoon.leeftijd > 67:
             procent = self.belasting.loonbelasting_aow
             alg_korting = self.belasting.alg_korting_aow
@@ -406,24 +441,54 @@ class Calculation:
 
 
 def regex_lookup(regex_string, data_to_search):
+    '''
+    Functie waarmee je een string uit tekst kan halen waarmee maar 1 match is
+
+    :param regex_string:    De regex code waarmee je wil zoeken
+    :param data_to_search:  De data waarin je wil zoeken
+    :return:                De tekst waar je naar zocht (als alles goed is gegaan)
+    '''
     reg = re.compile(r"" + regex_string + "", re.DOTALL)
     data = reg.search(data_to_search)
     return data.group(1)
 
 
 def regex_lookup_nogroup(regex_string, data_to_search):
+    '''
+    Functie waarmee je een string uit tekst kan halen die meerdere matches heeft
+    Selecteer de match die je wil mbv regex_lookup_nogroup(*args)[nummer match]
+
+    :param regex_string:    De regex code waarmee je wil zoeken
+    :param data_to_search:  De data waarin je wil zoeken
+    :return:                De tekst waar je naar zocht (als alles goed is gegaan)
+    '''
     reg = re.compile(r"" + regex_string + "", re.DOTALL)
     data = reg.findall(data_to_search)
     return data
 
 
 def read_html(url):
+    '''
+    Convert een url naar een html tekstbestand van die pagina
+
+    :param url:     Een url
+    :return:        De html code in plaintext van die url
+    '''
     response = urllib.request.urlopen(url)
     html = response.read().decode(response.headers.get_content_charset())
     return html
 
 
 def find_row(table, var):
+    '''
+    Vind de juiste rij van een schaaltabel waarin een persoon valt
+    Voorbeeld:  je verdient 20000 euro, schaal 1 van de tabel gaat tot 15000, schaal 2 tot 30000
+                je valt dan in schaal 1 (= rij 0)
+
+    :param table:   Tabel met de cutoffs van de verschillende schijven in kolom 0
+    :param var:     Hoogte van de waarde die je zoekt (bv loon)
+    :return:        Rijnummer waarin je valt (beginnend vanaf 0)
+    '''
     for row in range(len(table) - 1, -1, -1):  # count down from rows in table to 0
         try:
             if var > table[row][0]:
@@ -434,6 +499,15 @@ def find_row(table, var):
 
 
 def check_input(arguments, str_idx, int_idx):
+    '''
+    Checkt de input types van verschillende argumenten (str of int)
+    Mocht er een argument niet het juiste input type zijn moet deze meteen worden aangepast, hier wordt om gevraagd
+
+    :param arguments:   Alle argumenten die je invoert in de functie of class
+    :param str_idx:     De index nummers van argumenten die je wil checken op type 'str'
+    :param int_idx:     De index nummers van argumenten die je wil checken op type 'int'
+    :return:            De kloppende lijst van argumenten
+    '''
     arg_list_keys = list(arguments.keys())[1:]  # don't include self
     arg_list_values = list(arguments.values())[1:]
     for idx in str_idx:
