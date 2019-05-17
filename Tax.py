@@ -6,11 +6,19 @@ import string
 import datetime
 import openpyxl
 import os
+import ssl
 
 '''
 TODO arbeidsinkomen berekening niet hardcoden
 TODO premievolk
 TODO roken/alcohol accijns
+
+VOORBEELD
+boris = Persoon('5531vg',25,2500,0,300,600,2000,35000,1500,3000,93)
+auto = Voertuig(boris,'85tdpv',2500,20000)
+auto.get_data()
+tax = Belasting(boris,auto,2,0)
+resultaat = Calculation(boris,auto,tax)
 '''
 
 
@@ -29,9 +37,9 @@ class Persoon:
         self.uitgaven_hoog = params['uitgaven_hoog'] * 12
         self.spaargeld = params['spaargeld']
         self.schulden = params['schulden']
-        self.verbruik_gas = params['verbruik_gas'] * 12
-        self.verbruik_stroom = params['verbruik_stroom'] * 12
-        self.verbruik_water = params['verbruik_water'] * 12
+        self.verbruik_gas = params['verbruik_gas']
+        self.verbruik_stroom = params['verbruik_stroom']
+        self.verbruik_water = params['verbruik_water']
         self.bruto_loon_jr = self.bruto_loon_mnd * 12
         self.vakantiegeld = self.bruto_loon_jr * 0.08
         self.roken = 0
@@ -81,23 +89,42 @@ class Voertuig:
             self.kenteken = input('Kenteken moet 6 (12abcd) of 8 (12-ab-cd) tekens zijn >>> ')
 
     def get_data(self):
-        '''
-        Zet kenteken in de goede vorm (12-AB-CD of 12-ABC-3) ongeacht van inpu
-        '''
-        if len(self.kenteken) == 8:
-            self.kenteken = self.kenteken.upper()
-        else:  # is 6
-            int_count = 0
-            for letter in self.kenteken:
+        """
+        Zet kenteken in de goede vorm (12-AB-CD of 12-ABC-3) ongeacht van input
+        Altijd een streepje tussen letter en cijfer
+
+        probeer str[0] en int[1] of andersom
+        zo ja>streepje ertussen
+        zo nee > i+1
+        """
+        if len(self.kenteken) == 6:
+            dash_idx = []
+            kenteken_temp = []
+
+            # Kijk op welke plek een str of een int zit
+            for i in range(len(self.kenteken)):
                 try:
-                    int(letter)
-                    int_count += 1
+                    int(self.kenteken[i])
+                    dash_idx.append(1)
                 except ValueError:
-                    pass
-            if int_count > 2:
-                self.kenteken = (self.kenteken[:2] + '-' + self.kenteken[2:5] + '-' + self.kenteken[5]).upper()
-            else:
-                self.kenteken = (self.kenteken[:2] + '-' + self.kenteken[2:4] + '-' + self.kenteken[4:6]).upper()
+                    dash_idx.append(0)
+
+            # Zet streepjes tussen elke twee opeenvolgende verschillende tekens
+            for i in range(1, len(dash_idx)):
+                kenteken_temp.append(self.kenteken[i - 1])
+                if dash_idx[i] != dash_idx[i - 1]:
+                    kenteken_temp.append('-')
+            kenteken_temp.append(self.kenteken[-1])  # Voeg laatste teken toe
+            self.kenteken = ''.join(kenteken_temp)
+
+            # Als er maar 1 streepje in zit, zet een extra streepje tussen 4 opeenvolgende tekens
+            if self.kenteken.count('-') == 1:
+                if sum(dash_idx[:4]) == 0 or sum(dash_idx[:4]) == 4:  # first four are the same
+                    self.kenteken = self.kenteken[:2] + '-' + self.kenteken[2:]
+                else:  # last four are the same
+                    self.kenteken = self.kenteken[:5] + '-' + self.kenteken[5:]
+
+        self.kenteken = self.kenteken.upper()
 
         '''
         Haal automatisch informatie over de auto op
@@ -139,17 +166,17 @@ class Voertuig:
 
 class Belasting:
 
-    def __init__(self, persoon, auto, huishouden_personen, fiscale_partner):
-        '''
+    def __init__(self, persoon, voertuig, huishouden_personen, fiscale_partner):
+        """
         Verschillende belastingen worden hier berekend op basis van persoons/voertuigs gegevens
 
         :param persoon:             naam van de persoon gedefiniëerd in class Persoon
         :param auto:                naam van het voertuig gedefiniëerd in class Voertuig
         :param huishouden_personen: aantal personen waarmee je samenwoont
         :param fiscale_partner:     afwezigheid (0) of aanwezigheid (1) van een fiscale partner
-        '''
+        """
         self.persoon = persoon
-        self.auto = auto
+        self.auto = voertuig
         self.fiscale_partner = fiscale_partner
         try:
             self.huishouden_personen = int(huishouden_personen)
@@ -245,7 +272,7 @@ class Belasting:
         html = read_html(url)
 
         self.heffingsvrijvermogen = regex_lookup_nogroup("<span>€ (.*?)<\/span>", html)[0]
-        self.heffingsvrijvermogen = self.heffingsvrijvermogen * (self.belasting.fiscale_partner + 1)
+        self.heffingsvrijvermogen = self.heffingsvrijvermogen * (self.fiscale_partner + 1)
 
         # CO2
         url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/auto_en_vervoer/belastingen_op_auto_en_motor/bpm/bpm_berekenen_en_betalen/bpm_tarief/bpm-tarief-personenauto"
@@ -327,10 +354,8 @@ class Calculation:
         self.auto = auto
         self.belasting = belasting
 
-
-
     def get_BTW(self):
-        '''
+        """
         BTW wordt als volgt berekend:
         uitgaven met lage btw (voedsel etc) * 9%   +
         uitgaven met hogte btw (incidenteel, wasmachine etc) * 21%    +
@@ -338,7 +363,7 @@ class Calculation:
 
         Uitkomstvariabelen zijn:
         self.BTW
-        '''
+        """
         self.btw_laag = self.persoon.uitgaven_laag * 0.09
         self.btw_hoog = self.persoon.uitgaven_hoog * 0.21 + self.auto.km_jaar * self.auto.verbruik * self.belasting.benzine_btw
         self.btw = self.btw_hoog + self.btw_laag
@@ -348,17 +373,15 @@ class Calculation:
     # self.rokenalcohol = 52*(self.persoon.roken*self.belasting.roken_accijns*6.50 + self.persoon.alcohol*self.belasting.alcohol_accijns*0.3)*1.21
     print('Calculated roken/alcohol')
 
-
-
     def get_auto(self):
-        '''
+        """
         Brandstof accijns is verbruik * kilometers * accijns
         BPM wordt berekend per CO2 uitstoot met verschillende schalen
         Als je een diesel rijd die meer dan 61 g/km CO2 uitstoot betaal je extra dieseltoeslag
 
         Uitkomstvariabelen zijn:
         self.BPM
-        '''
+        """
         if self.auto.brandstof.lower() == 'benzine':
             self.brandstof_accijns = self.auto.km_jaar * self.auto.verbruik * self.belasting.benzine_accijns
         elif self.auto.brandstof.lower() == 'diesel':
@@ -378,7 +401,7 @@ class Calculation:
 
     # Loon
     def get_loon(self):
-        '''
+        """
         Verschillende aspecten van de loon worden hier berekend en aanvankelijk opgeslaan als losse variable, dus niet
         gekoppeld aan self (om de leesbaarheid van de berekeningen te behouden)
 
@@ -388,7 +411,7 @@ class Calculation:
         self.heffingskorting = heffingskorting
         self.arbeidskorting = arbeidskorting
         self.vermogensbelasting = vermogensbelasting
-        '''
+        """
         if self.persoon.leeftijd > 67:
             procent = self.belasting.loonbelasting_aow
             alg_korting = self.belasting.alg_korting_aow
@@ -441,46 +464,46 @@ class Calculation:
 
 
 def regex_lookup(regex_string, data_to_search):
-    '''
+    """
     Functie waarmee je een string uit tekst kan halen waarmee maar 1 match is
 
     :param regex_string:    De regex code waarmee je wil zoeken
     :param data_to_search:  De data waarin je wil zoeken
     :return:                De tekst waar je naar zocht (als alles goed is gegaan)
-    '''
+    """
     reg = re.compile(r"" + regex_string + "", re.DOTALL)
     data = reg.search(data_to_search)
     return data.group(1)
 
 
 def regex_lookup_nogroup(regex_string, data_to_search):
-    '''
+    """
     Functie waarmee je een string uit tekst kan halen die meerdere matches heeft
     Selecteer de match die je wil mbv regex_lookup_nogroup(*args)[nummer match]
 
     :param regex_string:    De regex code waarmee je wil zoeken
     :param data_to_search:  De data waarin je wil zoeken
     :return:                De tekst waar je naar zocht (als alles goed is gegaan)
-    '''
+    """
     reg = re.compile(r"" + regex_string + "", re.DOTALL)
     data = reg.findall(data_to_search)
     return data
 
 
 def read_html(url):
-    '''
+    """
     Convert een url naar een html tekstbestand van die pagina
 
     :param url:     Een url
     :return:        De html code in plaintext van die url
-    '''
+    """
     response = urllib.request.urlopen(url)
     html = response.read().decode(response.headers.get_content_charset())
     return html
 
 
 def find_row(table, var):
-    '''
+    """
     Vind de juiste rij van een schaaltabel waarin een persoon valt
     Voorbeeld:  je verdient 20000 euro, schaal 1 van de tabel gaat tot 15000, schaal 2 tot 30000
                 je valt dan in schaal 1 (= rij 0)
@@ -488,7 +511,7 @@ def find_row(table, var):
     :param table:   Tabel met de cutoffs van de verschillende schijven in kolom 0
     :param var:     Hoogte van de waarde die je zoekt (bv loon)
     :return:        Rijnummer waarin je valt (beginnend vanaf 0)
-    '''
+    """
     for row in range(len(table) - 1, -1, -1):  # count down from rows in table to 0
         try:
             if var > table[row][0]:
@@ -499,7 +522,7 @@ def find_row(table, var):
 
 
 def check_input(arguments, str_idx, int_idx):
-    '''
+    """
     Checkt de input types van verschillende argumenten (str of int)
     Mocht er een argument niet het juiste input type zijn moet deze meteen worden aangepast, hier wordt om gevraagd
 
@@ -507,7 +530,7 @@ def check_input(arguments, str_idx, int_idx):
     :param str_idx:     De index nummers van argumenten die je wil checken op type 'str'
     :param int_idx:     De index nummers van argumenten die je wil checken op type 'int'
     :return:            De kloppende lijst van argumenten
-    '''
+    """
     arg_list_keys = list(arguments.keys())[1:]  # don't include self
     arg_list_values = list(arguments.values())[1:]
     for idx in str_idx:
@@ -537,3 +560,10 @@ def check_input(arguments, str_idx, int_idx):
                     continue
     print('Checked all ints\n')
     return arguments
+
+
+boris = Persoon('5531vg', 25, 2500, 0, 300, 600, 2000, 35000, 1500, 3000, 93)
+auto = Voertuig(boris, '85tdpv', 2500, 20000)
+auto.get_data()
+tax = Belasting(boris, auto, 2, 0)
+resultaat = Calculation(boris, auto, tax)
