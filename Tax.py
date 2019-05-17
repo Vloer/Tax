@@ -6,12 +6,13 @@ import string
 import datetime
 import openpyxl
 import os
+import matplotlib.pyplot as plt
 import ssl
 
 '''
 TODO arbeidsinkomen berekening niet hardcoden
-TODO premievolk
 TODO roken/alcohol accijns
+TODO Energietaks = stroomverbruik * >>STROOMTAKS<< + gasverbruik * >>GASTAKS<<
 
 VOORBEELD
 boris = Persoon('5531vg',25,2500,0,300,600,2000,35000,1500,3000,93)
@@ -88,7 +89,6 @@ class Voertuig:
         if not (len(self.kenteken) != 8 or len(self.kenteken) != 6):
             self.kenteken = input('Kenteken moet 6 (12abcd) of 8 (12-ab-cd) tekens zijn >>> ')
 
-    def get_data(self):
         """
         Zet kenteken in de goede vorm (12-AB-CD of 12-ABC-3) ongeacht van input
         Altijd een streepje tussen letter en cijfer
@@ -272,7 +272,7 @@ class Belasting:
         html = read_html(url)
 
         self.heffingsvrijvermogen = regex_lookup_nogroup("<span>€ (.*?)<\/span>", html)[0]
-        self.heffingsvrijvermogen = self.heffingsvrijvermogen * (self.fiscale_partner + 1)
+        self.heffingsvrijvermogen = int((self.heffingsvrijvermogen * (self.fiscale_partner + 1)).replace('.', ''))
 
         # CO2
         url = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/auto_en_vervoer/belastingen_op_auto_en_motor/bpm/bpm_berekenen_en_betalen/bpm_tarief/bpm-tarief-personenauto"
@@ -408,9 +408,11 @@ class Calculation:
         Uitkomstvariabelen zijn:
         self.loontaks = loontaks
         self.loontaks_speciaal = loontaks_speciaal
+        self.loontaks_aow = loontaks_aow
         self.heffingskorting = heffingskorting
         self.arbeidskorting = arbeidskorting
         self.vermogensbelasting = vermogensbelasting
+        self.premievolk = premievolk
         """
         if self.persoon.leeftijd > 67:
             procent = self.belasting.loonbelasting_aow
@@ -430,12 +432,17 @@ class Calculation:
         row = find_row(schaal_loon, loon_bruto)
         over = loon_bruto - schaal_loon[row]
         loontaks = 0
+        loontaks_aow = 0
         if row == 0:
             loontaks += (schaal_loon[row + 1] - schaal_loon[row]) * procent[row]
+            loontaks_aow += (schaal_loon[row + 1] - schaal_loon[row]) * self.belasting.loonbelasting_aow[row]
         else:
             for schijf in range(row):
-                loontaks += (schaal_loon[schijf + 1] - schaal_loon[schijf]) * procent(schijf)
+                loontaks += ((schaal_loon[schijf + 1] - schaal_loon[schijf]) * procent[schijf])
+                loontaks_aow += (
+                        (schaal_loon[schijf + 1] - schaal_loon[schijf]) * self.belasting.loonbelasting_aow[schijf])
         loontaks += over * procent[row]
+        loontaks_aow += over * self.belasting.loonbelasting_aow[row]
 
         row = find_row(schaal_loon, loon_totaal)
         loontaks_speciaal = procent[row] * loon_speciaal
@@ -443,7 +450,7 @@ class Calculation:
         row = find_row(alg_korting, loon_bruto)
         heffingskorting = alg_korting[row][1]
 
-        row = find_row(schaal_arbeid, arbeid)
+        row = find_row(schaal_arbeid, loon_bruto)
         arbeidskorting = arbeid[row]
 
         # Vermogensbelasting
@@ -461,6 +468,77 @@ class Calculation:
                                            self.belasting.vermogensbelasting_schaal[schijf]) * \
                                           self.belasting.vermogensbelasting_rendement[schijf]
                 vermogensbelasting += over * self.belasting.vermogensbelasting_rendement[row]
+
+        if self.persoon.leeftijd > 67:
+            premievolk = 0
+        else:
+            premievolk = loontaks - (heffingskorting + arbeidskorting) - loontaks_aow
+
+        self.loontaks = round(loontaks, 2)
+        self.loontaks_speciaal = round(loontaks_speciaal, 2)
+        self.loontaks_aow = round(loontaks_aow, 2)
+        self.heffingskorting = round(heffingskorting, 2)
+        self.arbeidskorting = round(arbeidskorting, 2)
+        self.vermogensbelasting = round(vermogensbelasting, 2)
+        self.premievolk = round(premievolk, 2)
+        self.inkomstenbelasting = self.loontaks - (self.heffingskorting + self.arbeidskorting) - self.premievolk
+        print('Calculated loon')
+
+    # Figure
+    def show(self, chart_format):
+        while True:
+            if chart_format.lower() != 'relative':
+                if chart_format.lower() != 'absolute':
+                    if chart_format.lower() != 'both':
+                        chart_format = input(
+                            'Please give input \'relative\' or \'absolute\' or \'both\' for chart format >>>')
+                        continue
+                    else:
+                        break
+                else:
+                    break
+            else:
+                break
+        self.taks_alles = self.inkomstenbelasting + self.premievolk + self.btw + self.belasting.rioolheffing + \
+                          self.belasting.afvalheffing + self.belasting.OZB + self.brandstof_accijns + \
+                          self.belasting.MRB + self.loontaks_speciaal + self.vermogensbelasting
+        self.taks_pie_array = [self.inkomstenbelasting, self.premievolk, self.btw_laag, self.btw_hoog,
+                               self.belasting.rioolheffing, self.belasting.afvalheffing, self.belasting.OZB,
+                               self.brandstof_accijns, self.belasting.MRB, self.loontaks_speciaal,
+                               self.vermogensbelasting]
+        self.taks_pie_labels = ['Inkomensbelasting - kortingen', 'Premie volksverzekeringen', 'BTW laag', 'BTW hoog',
+                                'Rioolheffing', 'Afvalstoffenheffing', 'OZB (Indirect)', 'Accijns op brandstof',
+                                'Motorrijtuigen', 'Belasting op bonussen en vakantiegeld', 'Vermogensbelasting']
+        self.taks_dict = {}
+        for i in range(len(self.taks_pie_array)):
+            self.taks_dict[self.taks_pie_labels[i]] = self.taks_pie_array[i]
+        self.taks_dict_sort = sorted(self.taks_dict.items(), key=lambda x: x[1])  # sort descending
+
+        # Chance list back to dict
+        self.taks_dict = {}
+        for i in range(len(self.taks_dict_sort)):
+            self.taks_dict[self.taks_dict_sort[i][0]] = self.taks_dict_sort[i][1]
+
+        self.taks_ratio = self.taks_alles / self.persoon.loon_totaal
+
+        print('Made data arrays.\nGenerating pie plot...')
+
+        if chart_format.lower() == 'relative':
+            chart_format = '%1.1f%%'
+        elif chart_format.lower() == 'absolute':
+            chart_format = lambda p: '{:.0f}'.format((p * self.taks_alles) / 100)
+        else:  # show both
+            chart_format = lambda p: '{:.0f} ({:.2f}%)'.format((p * self.taks_alles) / 100, p)
+
+        fig1, ax1 = plt.subplots()
+        ax1.pie(list(self.taks_dict.values()), labels=list(self.taks_dict.keys()), autopct=chart_format)
+        ax1.axis('equal')
+        title_string = ('Totale jaarlijkse belasting: {} euro = {}%'.format(round(self.taks_alles, 2),
+                                                                            round(self.taks_ratio * 100, 2)))
+        plt.title(title_string)
+        plt.show()
+
+        print('Finished')
 
 
 def regex_lookup(regex_string, data_to_search):
@@ -562,8 +640,11 @@ def check_input(arguments, str_idx, int_idx):
     return arguments
 
 
-boris = Persoon('5531vg', 25, 2500, 0, 300, 600, 2000, 35000, 1500, 3000, 93)
+boris = Persoon('5531vg', 25, 2500, 10000, 300, 600, 2000, 35000, 1500, 3000, 93)
 auto = Voertuig(boris, '85tdpv', 2500, 20000)
-auto.get_data()
 tax = Belasting(boris, auto, 2, 0)
 resultaat = Calculation(boris, auto, tax)
+resultaat.get_auto()
+resultaat.get_loon()
+resultaat.get_BTW()
+resultaat.show('both')
