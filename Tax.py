@@ -595,11 +595,12 @@ def find_row(table, var):
                 return row
 
 
-boris = Persoon('5531vg', 25, 2500, 10000, 300, 600, 2000, 35000, 1500, 3000, 93)
-auto = Voertuig(boris, '85tdpv', 2500, 20000)
-tax = Belasting(boris, auto, 2, 0)
-resultaat = Calculation(boris, auto, tax)
-resultaat.get_auto()
-resultaat.get_loon()
-resultaat.get_BTW()
-resultaat.show('both')
+if __name__ == '__main__':
+    boris = Persoon('5531vg', 25, 2500, 10000, 300, 600, 2000, 35000, 1500, 3000, 93)
+    auto = Voertuig(boris, '85tdpv', 2500, 20000)
+    tax = Belasting(boris, auto, 2, 0)
+    resultaat = Calculation(boris, auto, tax)
+    resultaat.get_auto()
+    resultaat.get_loon()
+    resultaat.get_BTW()
+    resultaat.show('both')
